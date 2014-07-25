@@ -27,6 +27,15 @@ public final class R {
         public static final int stat_sys_signal_inout=0x7f02000d;
         public static final int stat_sys_signal_null=0x7f02000e;
         public static final int stat_sys_signal_out=0x7f02000f;
+        public static final int stat_sys_wifi_in=0x7f020010;
+        public static final int stat_sys_wifi_inout=0x7f020011;
+        public static final int stat_sys_wifi_out=0x7f020012;
+        public static final int stat_sys_wifi_signal=0x7f020013;
+        public static final int stat_sys_wifi_signal_0=0x7f020014;
+        public static final int stat_sys_wifi_signal_1=0x7f020015;
+        public static final int stat_sys_wifi_signal_2=0x7f020016;
+        public static final int stat_sys_wifi_signal_3=0x7f020017;
+        public static final int stat_sys_wifi_signal_4=0x7f020018;
     }
     public static final class layout {
         public static final int activity_main=0x7f030000;

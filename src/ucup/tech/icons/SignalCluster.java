@@ -7,6 +7,9 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
+import android.net.TrafficStats;
+import android.net.wifi.WifiManager;
+import android.os.Handler;
 import android.provider.Settings;
 import android.telephony.PhoneStateListener;
 import android.telephony.ServiceState;
@@ -14,34 +17,55 @@ import android.telephony.SignalStrength;
 import android.telephony.TelephonyManager;
 import android.util.AttributeSet;
 import android.util.Log;
+import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
-import android.widget.Toast;
+import android.widget.LinearLayout;
 
-public class SignalCluster extends FrameLayout{
-	private ImageView mDataIcon, mSignalIcon, mInOutIcon;
+public class SignalCluster extends LinearLayout{
+	private FrameLayout mSignalCluster, mWifiCluster;
+	private ImageView mDataIcon, mSignalIcon, mInOutIcon, mWifiSignalIcon, mWifiInOutIcon;
 	private final LayoutParams mLayoutParam = new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT);
 
 	private IntentFilter mFilter;
 	private Context mContext;
 	private ServiceState mService;
 	private Controller mControl;
+	private Handler mWifiHandler;
 
 	private int mDataState, mDataActivity, mSignalStrength;
+	private long lastTx,lastRx;
+	private boolean mIsWifiConnected = false;
+	private boolean isWifiInUse;
 	private final String TAG = "SignalCluster";
 	public SignalCluster(Context arg0, AttributeSet arg1) {
 		super(arg0, arg1);
 
 		mContext = arg0;
 		mControl = new Controller(arg0);
+		mWifiHandler = new Handler();
 
+		mSignalCluster = new FrameLayout(arg0); mSignalCluster.setLayoutParams(mLayoutParam);
 		mDataIcon = new ImageView(arg0); mSignalIcon = new ImageView(arg0); mInOutIcon = new ImageView(arg0);
 		mDataIcon.setLayoutParams(mLayoutParam); mSignalIcon.setLayoutParams(mLayoutParam); mInOutIcon.setLayoutParams(mLayoutParam);
+		mSignalCluster.addView(mDataIcon); mSignalCluster.addView(mSignalIcon); mSignalCluster.addView(mInOutIcon);
 
-		this.addView(mDataIcon); this.addView(mSignalIcon); this.addView(mInOutIcon);
+		mWifiCluster = new FrameLayout(arg0); mWifiCluster.setLayoutParams(mLayoutParam);
+		mWifiSignalIcon = new ImageView(arg0); mWifiInOutIcon = new ImageView(arg0);
+		mWifiSignalIcon.setLayoutParams(mLayoutParam); mWifiInOutIcon.setLayoutParams(mLayoutParam);
+		mWifiCluster.addView(mWifiSignalIcon); mWifiCluster.addView(mWifiInOutIcon);
+		mWifiInOutIcon.setImageDrawable(null);
+		mWifiCluster.setVisibility(View.GONE);
+		
+		this.addView(mWifiCluster); this.addView(mSignalCluster);
 
 		mFilter = new IntentFilter();
 		mFilter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
+		mFilter.addAction(WifiManager.WIFI_STATE_CHANGED_ACTION);
+		mFilter.addAction(WifiManager.SUPPLICANT_CONNECTION_CHANGE_ACTION);
+		mFilter.addAction(WifiManager.NETWORK_STATE_CHANGED_ACTION);
+		mFilter.addAction(WifiManager.RSSI_CHANGED_ACTION);
+
 		arg0.registerReceiver(mReceiver, mFilter);
 
 		((TelephonyManager)mContext.getSystemService(Context.TELEPHONY_SERVICE))
@@ -58,11 +82,23 @@ public class SignalCluster extends FrameLayout{
 			updateDataNetType(info.getSubtype());
 			updateInOutIcon();
 			updateSignalIcon();
+			mWifiCluster.setVisibility(View.GONE);
+			break;
+		case ConnectivityManager.TYPE_WIFI:
+			if (info.isConnected()) {
+				mIsWifiConnected = true;
+				mWifiCluster.setVisibility(View.VISIBLE);
+				mWifiHandler.post(WifiInOut);
+			}else{
+				mWifiHandler.removeCallbacks(WifiInOut);
+			}
 			break;
 		default:
 			makeLog("TYPE: NOT MOBILE");
 			this.mDataIcon.setImageDrawable(null);
 			this.mInOutIcon.setImageDrawable(null);
+			mWifiCluster.setVisibility(View.GONE);
+			mWifiHandler.removeCallbacks(WifiInOut);
 			break;
 		}
 	}
@@ -133,7 +169,7 @@ public class SignalCluster extends FrameLayout{
 			} else {
 				this.mSignalIcon.setImageResource(mControl.getDrawableId("stat_sys_signal_null"));
 			}
-			return;
+			return; 
 		}
 
 		if (mSignalStrength <= 0)
@@ -151,6 +187,39 @@ public class SignalCluster extends FrameLayout{
 		//makeLog("LEVEL: " + String.valueOf(level));
 		this.mSignalIcon.setImageLevel(level);
 		this.mSignalIcon.setImageResource(mControl.getDrawableId("stat_sys_signal"));
+	}
+
+	private void updateWifiSignalIcon(Intent intent){
+		final String action = intent.getAction();
+		if (action.equals(WifiManager.WIFI_STATE_CHANGED_ACTION)) {
+
+			final boolean enabled = intent.getIntExtra(WifiManager.EXTRA_WIFI_STATE,
+					WifiManager.WIFI_STATE_UNKNOWN) == WifiManager.WIFI_STATE_ENABLED;
+
+			if (!enabled) {
+				// If disabled, hide the icon. (We show icon when connected.)
+				mWifiCluster.setVisibility(View.GONE);
+			}
+
+		} else if (action.equals(WifiManager.SUPPLICANT_CONNECTION_CHANGE_ACTION)) {
+			final boolean enabled = intent.getBooleanExtra(WifiManager.EXTRA_SUPPLICANT_CONNECTED,
+					false);
+			if (!enabled) {
+				mWifiCluster.setVisibility(View.GONE);
+			}
+		} else if (action.equals(WifiManager.RSSI_CHANGED_ACTION)) {
+			int iconId;
+			final int newRssi = intent.getIntExtra(WifiManager.EXTRA_NEW_RSSI, -200);
+			int newSignalLevel = WifiManager.calculateSignalLevel(newRssi,
+					5);
+			if (mIsWifiConnected) {
+				iconId = newSignalLevel;
+			} else {
+				iconId = 0;
+			}
+			mWifiSignalIcon.setImageLevel(iconId);
+			mWifiSignalIcon.setImageResource(mControl.getDrawableId("stat_sys_wifi_signal"));
+		}
 	}
 	private boolean hasService() {
 		if (mService != null) {
@@ -172,9 +241,41 @@ public class SignalCluster extends FrameLayout{
 
 		@Override
 		public void onReceive(Context arg0, Intent arg1) {
-			updateConnectivity(arg1);
+			String action = arg1.getAction().toString();
+			if (action.equals(WifiManager.NETWORK_STATE_CHANGED_ACTION) ||
+					action.equals(WifiManager.WIFI_STATE_CHANGED_ACTION) ||
+					action.equals(WifiManager.RSSI_CHANGED_ACTION)) {
+				updateWifiSignalIcon(arg1);
+			}else if(action.equals(ConnectivityManager.CONNECTIVITY_ACTION)){
+				updateConnectivity(arg1);
+			}
 		}
 	};
+	
+	private Runnable WifiInOut = new Runnable() {
+
+	    public void run() {
+	        long cRx = TrafficStats.getTotalRxBytes() - TrafficStats.getMobileRxBytes();
+	        long cTx = TrafficStats.getTotalTxBytes() - TrafficStats.getMobileTxBytes();
+	        if (cTx - lastTx != 0 || cRx - lastRx != 0){
+	        	if (!isWifiInUse){
+	                isWifiInUse = true;
+	                mWifiInOutIcon.setImageResource(mControl.getDrawableId("stat_sys_wifi_inout"));
+	                if(cTx - lastTx !=0 && cRx - lastRx == 0){
+	                	mWifiInOutIcon.setImageResource(mControl.getDrawableId("stat_sys_wifi_in"));
+	                }else if(cTx - lastTx ==0 && cRx - lastRx != 0){
+	                	mWifiInOutIcon.setImageResource(mControl.getDrawableId("stat_sys_wifi_out"));
+	                }
+	        	}
+	        }else if (isWifiInUse){
+	        	isWifiInUse = false;
+	            mWifiInOutIcon.setImageDrawable(null);
+	        }
+	        lastRx = cRx;
+	        lastTx = cTx;
+	        mWifiHandler.postDelayed(this, 1000);
+	    }
+	}; 
 	private PhoneStateListener mPhoneStateListener = new PhoneStateListener() {
 		@Override
 		public void onServiceStateChanged(ServiceState state) {
